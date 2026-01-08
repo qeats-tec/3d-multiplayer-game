@@ -1,4 +1,5 @@
-const socket = io("http://localhost:3000");
+const socket = io("http://localhost:3000"); 
+// ⚠️ server online olunca burayı değiştireceğiz
 
 // ===== KULLANICI ADI =====
 let username = prompt("Kullanıcı adını gir:");
@@ -7,7 +8,6 @@ if (!username || username.trim() === "") {
 }
 socket.emit("setName", username);
 
-// ===== BEN KİMİM =====
 let myId = null;
 socket.on("me", id => myId = id);
 
@@ -23,6 +23,12 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// ===== IŞIK =====
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1);
+sun.position.set(10, 20, 10);
+scene.add(sun);
+
 // ===== ZEMİN =====
 const plane = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
@@ -31,22 +37,28 @@ const plane = new THREE.Mesh(
 plane.rotation.x = -Math.PI / 2;
 scene.add(plane);
 
-// ===== IŞIK =====
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 1);
-sun.position.set(10, 20, 10);
-scene.add(sun);
-
 // ===== OYUNCULAR =====
-const boxes = {};
+const players3D = {};
 
-function createBox(id) {
-  const mat = new THREE.MeshStandardMaterial({
-    color: id === myId ? 0x0000ff : 0x00ff00
-  });
-  const box = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), mat);
+function createPlayer(id, name) {
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(1,1,1),
+    new THREE.MeshStandardMaterial({
+      color: id === myId ? 0x0000ff : 0x00ff00
+    })
+  );
   scene.add(box);
-  boxes[id] = box;
+
+  const label = document.createElement("div");
+  label.textContent = name;
+  label.style.position = "absolute";
+  label.style.color = "white";
+  label.style.fontSize = "14px";
+  label.style.pointerEvents = "none";
+  label.style.display = "none";
+  document.body.appendChild(label);
+
+  players3D[id] = { box, label };
 }
 
 // ===== HAREKET =====
@@ -68,39 +80,20 @@ document.addEventListener("mousemove", e => {
   if (document.pointerLockElement === document.body) {
     yaw -= e.movementX * 0.002;
     pitch -= e.movementY * 0.002;
-
-    // yukarı-aşağı limit
     pitch = Math.max(-1.2, Math.min(1.2, pitch));
   }
 });
 
-// ===== SOCKET PLAYER UPDATE =====
+// ===== SERVER'DAN VERİ =====
 socket.on("players", data => {
-  for (let id in data) {
-    if (!boxes[id]) createBox(id);
-    boxes[id].position.set(data[id].x, 0.5, data[id].z);
+  const { players, names } = data;
+
+  for (let id in players) {
+    if (!players3D[id]) {
+      createPlayer(id, names[id] || "Oyuncu");
+    }
+    players3D[id].box.position.set(players[id].x, 0.5, players[id].z);
   }
-});
-
-// ===== CHAT =====
-const messages = document.getElementById("messages");
-const input = document.getElementById("input");
-
-input.addEventListener("keydown", e => {
-  if (e.key === "Enter" && input.value.trim() !== "") {
-    socket.emit("chat", {
-      name: username,
-      text: input.value
-    });
-    input.value = "";
-  }
-});
-
-socket.on("chat", data => {
-  const div = document.createElement("div");
-  div.textContent = `${data.name} : ${data.text}`;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
 });
 
 // ===== GAME LOOP =====
@@ -132,6 +125,25 @@ function animate() {
 
   camera.position.set(camX, camY, camZ);
   camera.lookAt(pos.x, 1, pos.z);
+
+  // ===== İSİM GÖSTER (YAKINLIK) =====
+  for (let id in players3D) {
+    const { box, label } = players3D[id];
+    const dist = camera.position.distanceTo(box.position);
+
+    if (dist < 8) {
+      label.style.display = "block";
+
+      const p = box.position.clone();
+      p.y += 1.5;
+      p.project(camera);
+
+      label.style.left = (p.x * 0.5 + 0.5) * innerWidth + "px";
+      label.style.top  = (-p.y * 0.5 + 0.5) * innerHeight + "px";
+    } else {
+      label.style.display = "none";
+    }
+  }
 
   renderer.render(scene, camera);
 }

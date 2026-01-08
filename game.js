@@ -29,10 +29,14 @@ const players = {};
 let myId = null;
 
 // Username gir
-document.getElementById("username").addEventListener("change", e => {
-  socket.emit("join", e.target.value);
-  e.target.disabled = true;
+document.getElementById("username").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.value.trim() !== "") {
+    socket.emit("join", e.target.value.trim());
+    e.target.disabled = true;
+    console.log("JOIN GÖNDERİLDİ:", e.target.value);
+  }
 });
+
 
 // Oyuncu oluştur
 function createPlayer(p) {
@@ -145,3 +149,4 @@ function animate() {
 }
 
 animate();
+

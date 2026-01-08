@@ -1,148 +1,144 @@
-const socket = io("http://localhost:3000"); 
-// ⚠️ server online olunca burayı değiştireceğiz
+const socket = io("https://threed-multiplayer-game.onrender.com");
 
-// ===== KULLANICI ADI =====
-let username = prompt("Kullanıcı adını gir:");
-if (!username || username.trim() === "") {
-  username = "Oyuncu" + Math.floor(Math.random() * 1000);
-}
-socket.emit("setName", username);
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb); // gökyüzü
 
-let myId = null;
-socket.on("me", id => myId = id);
+let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0, 2, 5);
 
-// ===== SCENE =====
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
-
-// ===== CAMERA =====
-const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
-
-// ===== RENDERER =====
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
+let renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// ===== IŞIK =====
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 1);
-sun.position.set(10, 20, 10);
+// Işık
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+let sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(5, 10, 5);
 scene.add(sun);
 
-// ===== ZEMİN =====
-const plane = new THREE.Mesh(
+// Zemin
+let ground = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
   new THREE.MeshStandardMaterial({ color: 0x55aa55 })
 );
-plane.rotation.x = -Math.PI / 2;
-scene.add(plane);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
 
-// ===== OYUNCULAR =====
-const players3D = {};
+// Oyuncular
+const players = {};
+let myId = null;
 
-function createPlayer(id, name) {
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(1,1,1),
-    new THREE.MeshStandardMaterial({
-      color: id === myId ? 0x0000ff : 0x00ff00
-    })
-  );
-  scene.add(box);
-
-  const label = document.createElement("div");
-  label.textContent = name;
-  label.style.position = "absolute";
-  label.style.color = "white";
-  label.style.fontSize = "14px";
-  label.style.pointerEvents = "none";
-  label.style.display = "none";
-  document.body.appendChild(label);
-
-  players3D[id] = { box, label };
-}
-
-// ===== HAREKET =====
-const keys = {};
-window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
-
-let pos = { x: 0, z: 0 };
-
-// ===== MOUSE KAMERA =====
-let yaw = 0;
-let pitch = 0;
-
-document.body.addEventListener("click", () => {
-  document.body.requestPointerLock();
+// Username gir
+document.getElementById("username").addEventListener("change", e => {
+  socket.emit("join", e.target.value);
+  e.target.disabled = true;
 });
 
+// Oyuncu oluştur
+function createPlayer(p) {
+  let cube = new THREE.Mesh(
+    new THREE.BoxGeometry(1,1,1),
+    new THREE.MeshStandardMaterial({ color: p.id === myId ? 0x0000ff : 0xff0000 })
+  );
+  cube.position.set(p.x, p.y, p.z);
+  scene.add(cube);
+
+  let label = document.createElement("div");
+  label.style.position = "absolute";
+  label.style.color = "white";
+  label.innerText = p.username;
+  document.body.appendChild(label);
+
+  players[p.id] = { mesh: cube, label };
+}
+
+// Server olayları
+socket.on("currentPlayers", data => {
+  myId = socket.id;
+  for (let id in data) createPlayer(data[id]);
+});
+
+socket.on("newPlayer", p => createPlayer(p));
+
+socket.on("playerMoved", p => {
+  if (players[p.id]) players[p.id].mesh.position.set(p.x, p.y, p.z);
+});
+
+socket.on("playerDisconnected", id => {
+  if (players[id]) {
+    scene.remove(players[id].mesh);
+    players[id].label.remove();
+    delete players[id];
+  }
+});
+
+// Hareket
+const keys = {};
+document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+// Mouse kamera
+let pitch = 0, yaw = 0;
 document.addEventListener("mousemove", e => {
   if (document.pointerLockElement === document.body) {
     yaw -= e.movementX * 0.002;
     pitch -= e.movementY * 0.002;
-    pitch = Math.max(-1.2, Math.min(1.2, pitch));
+    pitch = Math.max(-1.5, Math.min(1.5, pitch));
+  }
+});
+document.body.addEventListener("click", () => document.body.requestPointerLock());
+
+// Chat
+const chatBox = document.getElementById("chat");
+document.getElementById("chatInput").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.value) {
+    socket.emit("chat", e.target.value);
+    e.target.value = "";
   }
 });
 
-// ===== SERVER'DAN VERİ =====
-socket.on("players", data => {
-  const { players, names } = data;
-
-  for (let id in players) {
-    if (!players3D[id]) {
-      createPlayer(id, names[id] || "Oyuncu");
-    }
-    players3D[id].box.position.set(players[id].x, 0.5, players[id].z);
-  }
+socket.on("chat", data => {
+  let div = document.createElement("div");
+  div.textContent = `${data.user}: ${data.message}`;
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
 });
 
-// ===== GAME LOOP =====
+// Animasyon
 function animate() {
   requestAnimationFrame(animate);
 
-  if (keys["w"]) {
-    pos.x -= Math.sin(yaw) * 0.15;
-    pos.z -= Math.cos(yaw) * 0.15;
+  let me = players[myId];
+  if (me) {
+    if (keys["w"]) me.mesh.position.z -= 0.1;
+    if (keys["s"]) me.mesh.position.z += 0.1;
+    if (keys["a"]) me.mesh.position.x -= 0.1;
+    if (keys["d"]) me.mesh.position.x += 0.1;
+
+    socket.emit("move", {
+      x: me.mesh.position.x,
+      y: me.mesh.position.y,
+      z: me.mesh.position.z
+    });
+
+    camera.position.lerp(
+      new THREE.Vector3(
+        me.mesh.position.x,
+        me.mesh.position.y + 2,
+        me.mesh.position.z + 5
+      ),
+      0.1
+    );
+    camera.rotation.set(pitch, yaw, 0);
   }
-  if (keys["s"]) {
-    pos.x += Math.sin(yaw) * 0.15;
-    pos.z += Math.cos(yaw) * 0.15;
-  }
-  if (keys["a"]) {
-    pos.x -= Math.cos(yaw) * 0.15;
-    pos.z += Math.sin(yaw) * 0.15;
-  }
-  if (keys["d"]) {
-    pos.x += Math.cos(yaw) * 0.15;
-    pos.z -= Math.sin(yaw) * 0.15;
-  }
 
-  socket.emit("move", pos);
-
-  const camX = pos.x + Math.sin(yaw) * 8;
-  const camZ = pos.z + Math.cos(yaw) * 8;
-  const camY = 4 + Math.sin(pitch) * 5;
-
-  camera.position.set(camX, camY, camZ);
-  camera.lookAt(pos.x, 1, pos.z);
-
-  // ===== İSİM GÖSTER (YAKINLIK) =====
-  for (let id in players3D) {
-    const { box, label } = players3D[id];
-    const dist = camera.position.distanceTo(box.position);
-
-    if (dist < 8) {
-      label.style.display = "block";
-
-      const p = box.position.clone();
-      p.y += 1.5;
-      p.project(camera);
-
-      label.style.left = (p.x * 0.5 + 0.5) * innerWidth + "px";
-      label.style.top  = (-p.y * 0.5 + 0.5) * innerHeight + "px";
-    } else {
-      label.style.display = "none";
-    }
+  for (let id in players) {
+    let p = players[id];
+    let pos = p.mesh.position.clone().project(camera);
+    let x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+    let y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+    p.label.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+    p.label.style.display = camera.position.distanceTo(p.mesh.position) < 10 ? "block" : "none";
   }
 
   renderer.render(scene, camera);
